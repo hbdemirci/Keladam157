@@ -22,3 +22,15 @@ Tipik bir istek ~250 token sistem istemi + birkaç yüz token çıktı. "Mevcut 
 
 ## PSX görünümü
 320x240, vertex snapping (piksel titremesi), affine (perspektifsiz) texture, nearest filtre, 4x4 dither, 15-bit renk.
+
+## Taban gövde: "The Ward"
+Büyücüler, kullanıcının yüklediği `assets/Karakter_UE5.fbx` (The Ward low-poly karakteri, 537 vertex / 1046 üçgen, UE5 iskeleti) üzerinde kurulur.
+`assets/ward.js` bu FBX'ten çıkarılmış mesh'tir (Z-yukarı cm → Y-yukarı m, yüzü +z'ye bakar, T-pose, boy 1.8 m, ayaklar y=0).
+
+```
+mesh ward X Y Z OLCEK DERI UST BACAK BOT
+```
+Gruplar kemik ağırlıklarından türetildi: DERI = kafa/boyun/eller, UST = gövde/kollar, BACAK, BOT.
+Üstüne şapka, sakal, asa gibi primitive'ler eklenir.
+
+> Lisans: Orijinal "The Ward" OpenGameArt'taki lisansına tabidir (https://opengameart.org/content/the-ward-low-poly-character). CC-BY ise yaratıcıya atıf gerekir; yayınlamadan önce sayfadaki lisansı kontrol edin.
