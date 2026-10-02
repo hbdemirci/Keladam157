@@ -34,3 +34,13 @@ Gruplar kemik ağırlıklarından türetildi: DERI = kafa/boyun/eller, UST = gö
 Üstüne şapka, sakal, asa gibi primitive'ler eklenir.
 
 > Lisans: Orijinal "The Ward" OpenGameArt'taki lisansına tabidir (https://opengameart.org/content/the-ward-low-poly-character). CC-BY ise yaratıcıya atıf gerekir; yayınlamadan önce sayfadaki lisansı kontrol edin.
+
+---
+
+# Keladam — Büyülü Orta Çağ Toprak Savaşı (tasarım aşaması)
+
+OpenFront.io'dan esinlenen, sıfırdan yazılacak, Windows/Steam oyunu.
+
+- [01 — OpenFront.io Analizi](docs/01-OpenFront-Analizi.md)
+- [02 — Oyun Tasarım Belgesi](docs/02-Oyun-Tasarimi.md)
+- [03 — Teknik Mimari (Steam + Windows)](docs/03-Teknik-Mimari.md)
