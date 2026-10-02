@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PSX Modeler</title>
+<style>
+:root{--bg:#14141a;--pn:#1d1d26;--fg:#e6e6ee;--mu:#8a8a9c;--ac:#7c5cff;--bd:#2c2c3a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;display:grid;grid-template-columns:1fr 380px;height:100vh}
+@media(max-width:800px){body{grid-template-columns:1fr;height:auto}}
+#view{display:flex;align-items:center;justify-content:center;padding:12px;min-height:50vh}
+canvas{width:100%;max-width:960px;aspect-ratio:4/3;image-rendering:pixelated;background:#000;border:1px solid var(--bd);touch-action:none;cursor:grab}
+#panel{background:var(--pn);border-left:1px solid var(--bd);padding:12px;display:flex;flex-direction:column;gap:8px;overflow:auto}
+h1{font-size:15px;margin:0}
+label{color:var(--mu);font-size:12px}
+textarea,input,select{width:100%;background:#101015;color:var(--fg);border:1px solid var(--bd);border-radius:6px;padding:6px;font:12px ui-monospace,monospace}
+textarea#code{height:260px;resize:vertical}
+textarea#ask{height:56px;font-family:inherit;font-size:13px}
+button{background:var(--ac);color:#fff;border:0;border-radius:6px;padding:7px 10px;cursor:pointer;font-size:13px}
+button.s{background:#2c2c3a}
+button:disabled{opacity:.5}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.row>*{flex:1}
+#st{font-size:12px;color:var(--mu);min-height:34px;white-space:pre-wrap}
+#st.err{color:#ff7a7a}
+details summary{color:var(--mu);font-size:12px;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="view"><canvas id="cv" width="320" height="240"></canvas></div>
+<div id="panel">
+  <h1>PSX Modeler <span style="color:var(--mu);font-weight:400">· Claude destekli</span></h1>
+  <label>Claude'a ne istediğini yaz (kısa tut)</label>
+  <textarea id="ask" placeholder="örn: kırmızı çatılı taş bir kule ekle"></textarea>
+  <div class="row">
+    <button id="go">Claude ile üret / düzenle</button>
+    <button class="s" id="cp" title="API anahtarın yoksa: istemi kopyala, claude.ai'ye yapıştır, cevabı kod kutusuna koy">İstemi kopyala</button>
+  </div>
+  <div class="row"><label style="flex:0 0 auto"><input type="checkbox" id="cur" checked style="width:auto"> mevcut modeli gönder</label>
+  <label style="flex:0 0 auto"><input type="checkbox" id="spin" checked style="width:auto"> dön</label></div>
+  <div id="st"></div>
+  <label>Model kodu (elle de düzenleyebilirsin)</label>
+  <textarea id="code" spellcheck="false"></textarea>
+  <div class="row">
+    <button class="s" id="exo">OBJ+MTL+PNG indir</button>
+    <button class="s" id="exc">Kodu indir</button>
+  </div>
+  <details><summary>Ayarlar (API)</summary>
+    <label>Anthropic API anahtarı (sadece bu tarayıcıda saklanır, doğrudan api.anthropic.com'a gider)</label>
+    <input id="key" type="password" placeholder="sk-ant-...">
+    <label>Model</label>
+    <select id="model">
+      <option value="claude-haiku-4-5-20251001">Haiku 4.5 (en ucuz)</option>
+      <option value="claude-sonnet-5-5">Sonnet 5.5</option>
+    </select>
+  </details>
+  <details><summary>Kod dili</summary><pre id="spec" style="white-space:pre-wrap;font-size:11px;color:var(--mu)"></pre></details>
+</div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+
+// ---------- Claude'a giden sistem istemi (kasıtlı olarak çok kısa) ----------
+const SPEC=`You make low-poly PS1 models in a tiny DSL. Reply ONLY with DSL lines (no prose, no markdown). If MODEL is given, return the full updated DSL.
+Y is up, 1 unit ~ 1 m, shapes are centered at X Y Z. Sizes: W=x H=y D=z.
+tex NAME PATTERN SIZE C1 C2   (PATTERN: solid noise checker stripes bricks wood grass metal dots; SIZE 8|16|32; colors #rgb/#rrggbb)
+box X Y Z W H D TEX
+cyl X Y Z R H SEG TEX
+cone X Y Z R H SEG TEX
+sph X Y Z R SEG TEX
+plane X Y Z W D TEX
+Optional trailing flags: rx=deg ry=deg rz=deg, mx (also add mirror copy across x=0, good for limbs). '#' starts a comment.
+Keep it small: <=25 shapes, few textures, SEG 5-8.`;
+$('spec').textContent=SPEC;
+
+// ---------- yardımcılar ----------
+const hex=s=>{s=s.replace('#','');if(s.length==3)s=[...s].map(c=>c+c).join('');const n=parseInt(s,16);if(isNaN(n))return[128,128,128];return[(n>>16)&255,(n>>8)&255,n&255]};
+const q5=v=>{v=Math.max(0,Math.min(255,v))>>3;return v<<3|v>>2};
+function rng(str){let h=1779033703^str.length;for(let i=0;i<str.length;i++){h=Math.imul(h^str.charCodeAt(i),3432918353);h=h<<13|h>>>19}
+  let a=h>>>0;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+// ---------- prosedürel texture'lar (nearest, 15-bit renk) ----------
+function makeTex(name,pat,S,c1,c2){
+  S=[4,8,16,32,64].reduce((b,v)=>Math.abs(v-S)<Math.abs(b-S)?v:b,16);
+  const r=rng(name+pat),A=hex(c1),B=hex(c2),d=new Uint8Array(S*S*3);
+  const mix=(a,b,t)=>a.map((v,i)=>v+(b[i]-v)*t);
+  const jit=(c,a)=>{const j=(r()-.5)*a;return c.map(v=>v+j)};
+  const col=Array.from({length:S},()=>r());
+  for(let y=0;y<S;y++)for(let x=0;x<S;x++){
+    let c;
+    switch(pat){
+      case'solid':c=jit(A,10);break;
+      case'checker':c=((x*4/S|0)+(y*4/S|0))&1?B:A;break;
+      case'stripes':c=(y*4/S|0)&1?jit(B,8):jit(A,8);break;
+      case'bricks':{const bh=Math.max(2,S>>2),row=(y/bh)|0,xo=(x+(row&1)*(S>>2))%(S>>1);
+        c=(y%bh==0||xo==0)?B:jit(A,36);break}
+      case'wood':c=mix(A,B,(Math.sin(x*1.9+col[x]*3)*.5+.5)*.7+r()*.2);break;
+      case'grass':c=mix(A,B,r()<.25?1:r()*.6);break;
+      case'metal':c=(x%(S>>1)==0||y%(S>>1)==0)?B:jit(A,14);break;
+      case'dots':c=(x%4==1&&y%4==1)?B:jit(A,8);break;
+      default:c=mix(A,B,r())
+    }
+    const o=(y*S+x)*3;d[o]=q5(c[0]);d[o+1]=q5(c[1]);d[o+2]=q5(c[2]);
+  }
+  return{name,S,d};
+}
+
+// ---------- DSL -> üçgenler ----------
+function build(src){
+  const texes={},tris=[],errs=[];
+  const T=n=>{if(!texes[n]){errs.push('texture yok: '+n);texes[n]=makeTex(n,'solid',8,'#c0c','#c0c')}return texes[n]};
+  const tri=(a,b,c,ua,ub,uc,t)=>tris.push({p:[a,b,c],uv:[ua,ub,uc],t});
+  const quad=(a,b,c,d,w,h,t)=>{tri(a,b,c,[0,0],[w,0],[w,h],t);tri(a,c,d,[0,0],[w,h],[0,h],t)};
+  const rot=(p,rx,ry,rz)=>{let[x,y,z]=p,c,s;
+    c=Math.cos(rx);s=Math.sin(rx);[y,z]=[y*c-z*s,y*s+z*c];
+    c=Math.cos(ry);s=Math.sin(ry);[x,z]=[x*c+z*s,-x*s+z*c];
+    c=Math.cos(rz);s=Math.sin(rz);[x,y]=[x*c-y*s,x*s+y*c];return[x,y,z]};
+  src.split('\n').forEach((ln,li)=>{
+    ln=ln.trim();
+    // '#' renk için de kullanılıyor: yorum sadece satır başında
+    if(!ln||ln[0]=='#')return;
+    const tk=ln.split(/\s+/),cmd=tk.shift(),fl={},pos=[];
+    tk.forEach(t=>{const m=t.match(/^(r[xyz])=(-?[\d.]+)$/);if(m)fl[m[1]]=+m[2]*Math.PI/180;else if(t=='mx')fl.mx=1;else pos.push(t)});
+    if(cmd=='tex'){const[n,p,s,c1,c2]=pos;texes[n]=makeTex(n,p||'noise',+s||16,c1||'#888',c2||'#444');return}
+    const n=pos.map(Number),tn=pos[pos.length-1],t=T(tn),start=tris.length;
+    const loc=[];const L=(a,b,c,ua,ub,uc)=>loc.push({p:[a,b,c],uv:[ua,ub,uc]});
+    const Q=(a,b,c,d,w,h)=>{L(a,b,c,[0,0],[w,0],[w,h]);L(a,c,d,[0,0],[w,h],[0,h])};
+    let[x,y,z]=n;
+    if(cmd=='box'){const[,, ,w,h,d]=n,X=w/2,Y=h/2,Z=d/2;
+      Q([-X,-Y,Z],[X,-Y,Z],[X,Y,Z],[-X,Y,Z],w,h);
+      Q([X,-Y,-Z],[-X,-Y,-Z],[-X,Y,-Z],[X,Y,-Z],w,h);
+      Q([X,-Y,Z],[X,-Y,-Z],[X,Y,-Z],[X,Y,Z],d,h);
+      Q([-X,-Y,-Z],[-X,-Y,Z],[-X,Y,Z],[-X,Y,-Z],d,h);
+      Q([-X,Y,Z],[X,Y,Z],[X,Y,-Z],[-X,Y,-Z],w,d);
+      Q([-X,-Y,-Z],[X,-Y,-Z],[X,-Y,Z],[-X,-Y,Z],w,d)}
+    else if(cmd=='cyl'||cmd=='cone'){const R=n[3],H=n[4],N=Math.max(3,n[5]|0),R1=cmd=='cone'?0:R,C=Math.max(1,Math.round(2*Math.PI*R));
+      const P=(i,yy,rr)=>{const a=2*Math.PI*i/N;return[Math.cos(a)*rr,yy,-Math.sin(a)*rr]};
+      for(let i=0;i<N;i++){
+        const a=P(i,-H/2,R),b=P(i+1,-H/2,R),c=P(i+1,H/2,R1),e=P(i,H/2,R1),u0=i/N*C,u1=(i+1)/N*C;
+        L(a,b,c,[u0,0],[u1,0],[u1,H]);L(a,c,e,[u0,0],[u1,H],[u0,H]);
+        const uvc=p=>[p[0]+R,p[2]+R];
+        if(R1>0)L([0,H/2,0],P(i,H/2,R1),P(i+1,H/2,R1),[R,R],uvc(e),uvc(c));
+        L([0,-H/2,0],P(i+1,-H/2,R),P(i,-H/2,R),[R,R],uvc(b),uvc(a));
+      }}
+    else if(cmd=='sph'){const R=n[3],N=Math.max(4,n[4]|0),M=Math.max(3,N>>1);
+      const P=(i,j)=>{const th=2*Math.PI*i/N,ph=Math.PI*j/M;return[R*Math.sin(ph)*Math.cos(th),R*Math.cos(ph),-R*Math.sin(ph)*Math.sin(th)]};
+      for(let i=0;i<N;i++)for(let j=0;j<M;j++){
+        const a=P(i,j+1),b=P(i+1,j+1),c=P(i+1,j),e=P(i,j),u0=i/N*4,u1=(i+1)/N*4,v0=2-j/M*2,v1=2-(j+1)/M*2;
+        L(a,b,c,[u0,v1],[u1,v1],[u1,v0]);L(a,c,e,[u0,v1],[u1,v0],[u0,v0])}}
+    else if(cmd=='plane'){const X=n[3]/2,Z=n[4]/2;Q([-X,0,Z],[X,0,Z],[X,0,-Z],[-X,0,-Z],n[3],n[4])}
+    else{errs.push(`satır ${li+1}: bilinmeyen komut '${cmd}'`);return}
+    const place=m=>loc.map(f=>({p:f.p.map(v=>{const r=rot(v,fl.rx||0,fl.ry||0,fl.rz||0);return[r[0]+x,r[1]+y,r[2]+z]}),uv:f.uv,t}));
+    const base=place();base.forEach(f=>tris.push(f));
+    if(fl.mx)base.forEach(f=>tris.push({p:f.p.map(v=>[-v[0],v[1],v[2]]).reverse(),uv:[...f.uv].reverse(),t}));
+    if(base.some(f=>f.p.some(v=>v.some(isNaN))))errs.push(`satır ${li+1}: sayı hatası`),tris.length=start;
+  });
+  return{texes,tris,errs};
+}
+
+// ---------- yazılım rasterizer (PSX: affine uv, vertex snap, dither, 15-bit) ----------
+const cv=$('cv'),ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+const img=ctx.createImageData(W,H),zb=new Float32Array(W*H);
+const bayer=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+let M={texes:{},tris:[],errs:[]},cam={yaw:.7,pitch:.35,dist:8,tx:0,ty:1,tz:0};
+const LIGHT=(()=>{const v=[.5,.9,.4],l=Math.hypot(...v);return v.map(x=>x/l)})();
+
+function render(){
+  const px=img.data;
+  for(let i=0;i<W*H;i++){px[i*4]=40;px[i*4+1]=48;px[i*4+2]=72;px[i*4+3]=255}
+  zb.fill(1e9);
+  const cp=Math.cos(cam.pitch),e=[cam.tx+cam.dist*cp*Math.sin(cam.yaw),cam.ty+cam.dist*Math.sin(cam.pitch),cam.tz+cam.dist*cp*Math.cos(cam.yaw)];
+  const nz=v=>{const l=Math.hypot(...v)||1;return v.map(x=>x/l)};
+  const cr=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+  const dt=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+  const f=nz([cam.tx-e[0],cam.ty-e[1],cam.tz-e[2]]),r=nz(cr(f,[0,1,0])),u=cr(r,f),F=H*.95;
+  for(const tr of M.tris){
+    const [A,B,C]=tr.p,ab=[B[0]-A[0],B[1]-A[1],B[2]-A[2]],ac=[C[0]-A[0],C[1]-A[1],C[2]-A[2]];
+    const n=cr(ab,ac);
+    if(dt(n,[A[0]-e[0],A[1]-e[1],A[2]-e[2]])>=0)continue; // backface
+    const nn=nz(n),sh=.5+.5*Math.max(0,dt(nn,LIGHT));
+    const s=[];let bad=false;
+    for(const p of tr.p){const v=[p[0]-e[0],p[1]-e[1],p[2]-e[2]],d=dt(v,f);if(d<.1){bad=true;break}
+      s.push([Math.round(W/2+dt(v,r)/d*F),Math.round(H/2-dt(v,u)/d*F),d])}
+    if(bad)continue;
+    const[a,b,c]=s,area=(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+    if(!area)continue;
+    const x0=Math.max(0,Math.min(a[0],b[0],c[0])),x1=Math.min(W-1,Math.max(a[0],b[0],c[0])),
+          y0=Math.max(0,Math.min(a[1],b[1],c[1])),y1=Math.min(H-1,Math.max(a[1],b[1],c[1]));
+    const tx=M.texes[tr.t.name]||tr.t,S=tx.S,td=tx.d,[ua,ub,uc]=tr.uv;
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const w0=((b[0]-x)*(c[1]-y)-(b[1]-y)*(c[0]-x))/area,w1=((c[0]-x)*(a[1]-y)-(c[1]-y)*(a[0]-x))/area,w2=1-w0-w1;
+      if(w0<-1e-9||w1<-1e-9||w2<-1e-9)continue;
+      const z=w0*a[2]+w1*b[2]+w2*c[2],zi=y*W+x;if(z>=zb[zi])continue;zb[zi]=z;
+      const uu=w0*ua[0]+w1*ub[0]+w2*uc[0],vv=w0*ua[1]+w1*ub[1]+w2*uc[1]; // affine (perspective düzeltme yok)
+      const o=((Math.floor(vv*S)&(S-1))*S+(Math.floor(uu*S)&(S-1)))*3,dh=(bayer[(y&3)*4+(x&3)]-8)*.6,p=zi*4;
+      px[p]=q5(td[o]*sh+dh);px[p+1]=q5(td[o+1]*sh+dh);px[p+2]=q5(td[o+2]*sh+dh);
+    }
+  }
+  ctx.putImageData(img,0,0);
+}
+
+// ---------- model yükleme / durum ----------
+const st=(m,err)=>{$('st').textContent=m;$('st').className=err?'err':''};
+function fit(){
+  let mn=[1e9,1e9,1e9],mx=[-1e9,-1e9,-1e9];
+  for(const t of M.tris)for(const p of t.p)for(let i=0;i<3;i++){mn[i]=Math.min(mn[i],p[i]);mx[i]=Math.max(mx[i],p[i])}
+  if(mn[0]>mx[0])return;
+  cam.tx=(mn[0]+mx[0])/2;cam.ty=(mn[1]+mx[1])/2;cam.tz=(mn[2]+mx[2])/2;
+  cam.dist=Math.max(2,Math.hypot(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2])*.6);
+}
+function load(src,refit){
+  M=build(src);if(refit)fit();render();
+  st(`${M.tris.length} üçgen · ${Object.keys(M.texes).length} texture`+(M.errs.length?'\n'+M.errs.join('\n'):''),M.errs.length>0);
+}
+let tmr;$('code').addEventListener('input',()=>{clearTimeout(tmr);tmr=setTimeout(()=>{try{localStorage.psx=$('code').value}catch(_){}load($('code').value,false)},250)});
+
+// ---------- kamera ----------
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointerup',()=>{drag=null;cv.style.cursor='grab'});
+cv.addEventListener('pointermove',e=>{if(!drag)return;
+  cam.yaw-=(e.clientX-drag[0])*.01;cam.pitch=Math.max(-1.4,Math.min(1.4,cam.pitch+(e.clientY-drag[1])*.01));drag=[e.clientX,e.clientY];render()});
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=Math.max(1,cam.dist*(e.deltaY>0?1.1:.9));render()},{passive:false});
+let last=0;(function loop(t){requestAnimationFrame(loop);if($('spin').checked&&!drag&&t-last>50){last=t;cam.yaw+=.03;render()}})(0);
+
+// ---------- Claude ----------
+const stripFence=s=>s.replace(/^```\w*\n?/,'').replace(/```\s*$/,'').trim();
+function userMsg(){const a=$('ask').value.trim(),c=$('code').value.trim();return($('cur').checked&&c?'MODEL:\n'+c+'\n':'')+'REQUEST: '+a}
+$('go').onclick=async()=>{
+  const key=$('key').value.trim();
+  if(!$('ask').value.trim())return st('Önce bir istek yaz.',1);
+  if(!key)return st('API anahtarı yok: Ayarlar\'dan ekle ya da "İstemi kopyala" ile claude.ai kullan.',1);
+  try{localStorage.psxkey=key}catch(_){}
+  $('go').disabled=true;st('Claude düşünüyor...');
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:$('model').value,max_tokens:1500,system:SPEC,messages:[{role:'user',content:userMsg()}]})});
+    const j=await r.json();if(!r.ok)throw new Error(j.error?.message||r.status);
+    const code=stripFence(j.content.map(b=>b.text||'').join(''));
+    $('code').value=code;try{localStorage.psx=code}catch(_){}
+    load(code,true);
+    st($('st').textContent+`\nToken: ${j.usage.input_tokens} giriş / ${j.usage.output_tokens} çıkış`,M.errs.length>0);
+  }catch(e){st('Hata: '+e.message,1)}
+  $('go').disabled=false;
+};
+$('cp').onclick=async()=>{await navigator.clipboard.writeText(SPEC+'\n\n'+userMsg());st('Panoya kopyalandı. Claude cevabını kod kutusuna yapıştır.')};
+
+// ---------- dışa aktarma ----------
+const dl=(name,data,type)=>{const a=document.createElement('a');a.href=URL.createObjectURL(data instanceof Blob?data:new Blob([data],{type}));a.download=name;a.click()};
+$('exc').onclick=()=>dl('model.psx.txt',$('code').value,'text/plain');
+$('exo').onclick=()=>{
+  let v='',vt='',f='',n=0;const by={};
+  for(const t of M.tris)(by[t.t.name]??=[]).push(t);
+  for(const[name,ts]of Object.entries(by)){f+=`usemtl ${name}\n`;
+    for(const t of ts){let idx='f';for(let i=0;i<3;i++){const p=t.p[i],u=t.uv[i];v+=`v ${p.map(x=>x.toFixed(4)).join(' ')}\n`;vt+=`vt ${u[0].toFixed(4)} ${u[1].toFixed(4)}\n`;n++;idx+=` ${n}/${n}`}f+=idx+'\n'}}
+  dl('model.obj',`mtllib model.mtl\n${v}${vt}${f}`,'text/plain');
+  dl('model.mtl',Object.keys(M.texes).map(k=>`newmtl ${k}\nKd 1 1 1\nmap_Kd ${k}.png\n`).join('\n'),'text/plain');
+  for(const tx of Object.values(M.texes)){const c=document.createElement('canvas');c.width=c.height=tx.S;const x=c.getContext('2d'),im=x.createImageData(tx.S,tx.S);
+    for(let i=0;i<tx.S*tx.S;i++){im.data.set([tx.d[i*3],tx.d[i*3+1],tx.d[i*3+2],255],i*4)}x.putImageData(im,0,0);c.toBlob(b=>dl(tx.name+'.png',b))}
+};
+
+// ---------- başlangıç ----------
+const DEMO=`tex skin noise 8 #e8b48a #d9a07a
+tex shirt stripes 16 #c33 #a22
+tex pants solid 8 #335 #224
+tex grass grass 16 #3a3 #284
+tex wood wood 16 #8a5a2b #5a3a1b
+tex brick bricks 16 #b55 #633
+plane 0 0 0 10 10 grass
+box 0 1.1 0 .8 .8 .4 shirt
+sph 0 1.8 0 .3 8 skin
+box .2 .35 0 .3 .7 .3 pants mx
+box .55 1.1 0 .2 .8 .25 shirt mx
+box 3 1 -2 2.4 2 2 brick
+cone 3 2.6 -2 1.9 1.2 4 wood ry=45
+cyl -3 .6 -2 .2 1.2 6 wood
+sph -3 1.7 -2 .9 8 grass`;
+try{$('key').value=localStorage.psxkey||''}catch(_){}
+let init=DEMO;try{init=localStorage.psx||DEMO}catch(_){}
+$('code').value=init;load(init,true);
+</script>
+</body>
+</html>
