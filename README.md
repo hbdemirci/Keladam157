@@ -44,3 +44,28 @@ OpenFront.io'dan esinlenen, sıfırdan yazılacak, Windows/Steam oyunu.
 - [01 — OpenFront.io Analizi](docs/01-OpenFront-Analizi.md)
 - [02 — Oyun Tasarım Belgesi](docs/02-Oyun-Tasarimi.md)
 - [03 — Teknik Mimari (Steam + Windows)](docs/03-Teknik-Mimari.md)
+
+## M0 prototipi (tek oyunculu, Godot 4.7 + C#)
+
+![Yapay zekâ maçı, 2. dakika](docs/img/m0-sim.png)
+
+| Klasör | İçerik |
+|---|---|
+| `src/Keladam.Core` | Deterministik simülasyon (motor bağımsız, kayan nokta yok) |
+| `tests/Keladam.Core.Tests` | Birim + determinizm/replay testleri |
+| `tools/Keladam.Sim` | Ekransız yapay zekâ maçı → PNG |
+| `game/` | Godot projesi (shader ile harita, arayüz, kamera) |
+
+**Çalıştırma**
+1. [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) ve **Godot 4.7 .NET** sürümünü kurun.
+2. Godot'ta `game/project.godot`'u açın → F5.
+3. Testler: `dotnet test` · Ekransız maç: `dotnet run -c Release --project tools/Keladam.Sim -- <tohum> <tick> out/sim.png`
+
+**Kontroller**
+- İlk 15 sn: haritaya tıkla → başlangıç yeri.
+- Sol tık: tıklanan diyara (ya da sahipsiz araziye) saldır. Aynı hedefe tekrar tıklamak cepheye asker ekler.
+- Saldırı oranı: alttaki kaydırıcı veya `1`–`9` tuşları (%10–%90).
+- Kamera: sağ/orta tuşla sürükle, tekerlek yakınlaştır, WASD/ok tuşları; `Space` kendi diyarına git.
+- `P` duraklat, `+`/`-` oyun hızı, `F5` yeni harita.
+
+Windows .exe: Godot → Proje → Dışa Aktar → Windows Desktop (export şablonlarını Godot indirir).

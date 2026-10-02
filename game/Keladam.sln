@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Keladam", "Keladam.csproj", "{80D33A26-0B6F-4402-A1FF-D6D5D5ACE8FA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Keladam.Core", "..\src\Keladam.Core\Keladam.Core.csproj", "{26AA21D6-772A-4521-A439-7B992A2C1938}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{80D33A26-0B6F-4402-A1FF-D6D5D5ACE8FA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80D33A26-0B6F-4402-A1FF-D6D5D5ACE8FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80D33A26-0B6F-4402-A1FF-D6D5D5ACE8FA}.Release|Any CPU.ActiveCfg = Debug|Any CPU
+		{80D33A26-0B6F-4402-A1FF-D6D5D5ACE8FA}.Release|Any CPU.Build.0 = Debug|Any CPU
+		{26AA21D6-772A-4521-A439-7B992A2C1938}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{26AA21D6-772A-4521-A439-7B992A2C1938}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{26AA21D6-772A-4521-A439-7B992A2C1938}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{26AA21D6-772A-4521-A439-7B992A2C1938}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
